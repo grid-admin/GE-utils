@@ -1,0 +1,95 @@
+.TH "YAIM-SGE-UTILS" 1
+.SH NAME
+The yaim-sge-utils module is a yaim plugin to configure Sun Grid Engine batch system, and to enable 
+its proper interaction with an EGEE Computing Element. At the moment, LCG-CE and CreamCE are supported. 
+It assumes that the SGE software and that the glite-SGE_utils meta-package are already installed (see 
+the "Generic Installation and Configuration Guide for gLite 3.1").
+
+
+.SH DESCRIPTION
+The yaim-sge-utils module allows you to configure the Computing Element to properly interact
+with the SGE Qmaster Server which should be running in a different machine.
+
+
+.SH CONFIGURATION VARIABLES
+This is the list of variables needed to set up in order to configure the SGE_utils.
+.TP
+For more details, please check:
+.TP 
+.B  https://twiki.cern.ch/twiki/bin/view/LCG/SGE_utils_configuration_variables
+.TP
+.B Mandatory Variables: 
+sys admins must ensure these variables are properly defined according to the features of the site
+.TP
+site-info.def variables: APEL_DB_PASSWORD, BATCH_LOG_DIR, BATCH_SERVER, CE_HOST, MON_HOST, MY_DOMAIN, QUEUES, SITE_NAME
+.TP
+APEL_DB_PASSWORD : Database password for APEL.
+.TP
+BATCH_LOG_DIR : Your batch system's log directory.
+.TP
+BATCH_SERVER : Your batch server host.
+.TP
+CE_HOST : Your Computing element host.
+.TP
+MON_HOST : Your MonBox host.
+.TP
+MY_DOMAIN : The site's domain name.
+.TP
+QUEUES : The name of the queues for the CE.
+.TP
+SITE_NAME : Your site name.
+.TP
+.B Optional Variables: 
+sys admins do not need to change the value of these variables since YAIM provides suitable default 
+values in /opt/glite/yaim/defaults
+.TP
+SGE_ROOT : SGE intallation path. Default is /usr/local/sge/pro
+.TP
+SGE_CELL : SGE installation cell. Default is default
+.TP
+SGE_QMASTER : SGE Qmaster port. Default is 536
+.TP
+SGE_EXECD : SGE execd port. Default is 537
+.TP
+SGE_SPOOL_METH : SGE spooling method. Only classic is supported
+.TP
+SGE_SHARED_INSTALL : Set this variable to yes if you are using a SHARED SGE INSTALLATION. In this case, 
+SGE will not be configured. Default is no. 
+
+
+.SH EXAMPLES
+How to configure the SGE_utils node.
+.TP
+.B ./yaim -c -s /root/site-info.def -n lcg-CE|creamCE -n SGE_utils
+
+
+.SH DOCUMENTATION
+You can find useful information on these web pages:
+.TP
+Entry point for SGE_utils documentation:
+.TP
+.B https://twiki.cern.ch/twiki/bin/view/LCG/GenericInstallGuide310#The_SGE_batch_system
+.TP
+Entry point for YAIM documentation:
+.TP
+.B  https://twiki.cern.ch/twiki/bin/view/EGEE/YAIM
+.TP
+The Generic Installation and Configuration guides as well as the YAIM guides:
+.TP
+.B https://twiki.cern.ch/twiki/bin/view/LCG/LcgDocs
+.TP
+Useful links:
+.TP
+.B  http://lcg.web.cern.ch/LCG/Sites/the-LCG-directory.html
+
+
+.SH AUTHORS
+yaim-sge-utils was developed by Goncalo Borges, LIP, Lisbon, Portugal
+.B goncalo@lip.pt
+
+
+.SH CONTACT
+To contact YAIM people use the 
+.B yaim-contact@cern.ch 
+email address. 
+

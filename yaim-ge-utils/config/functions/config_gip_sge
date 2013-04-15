@@ -1,0 +1,308 @@
+###############################################################################
+# Copyright (c) Members of the EGEE Collaboration. 2004.
+# See http://www.eu-egee.org/partners/ for details on the copyright holders.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+###############################################################################
+#
+# NAME        : config_gip_sge
+#
+# DESCRIPTION : Configures the SGE information provider for lcg-CE / CreamCE
+#
+# AUTHORS     : goncalo@lip.pt,ge-support@listas.cesga.es
+#
+# NOTES       :
+#
+# YAIM MODULE : glite-yaim-sge-utils
+#
+###############################################################################
+
+
+function config_gip_sge_check(){
+    requires $1 QUEUES SGE_ROOT SGE_CELL JOB_MANAGER
+    return $?
+}
+
+
+function config_gip_sge_setenv(){
+    return 0
+}
+
+
+function config_gip_sge(){
+
+###
+### Get glite version
+###
+
+yaimlog DEBUG "Getting EMI version... "
+
+emi_version=/etc/emi-version
+
+if [ ! -e ${emi_version} ]; then
+    yaimlog ABORT "EMI version not found Exiting..."
+    exit 1
+fi
+
+yaimlog DEBUG "Running SGE Grid Gateway configuration for gLite version $emi_version!"
+
+
+#---*---
+
+
+###
+### Check the content of JOB_MANAGER variable
+###
+
+JOB_MANAGER_SET=`echo $JOB_MANAGER | sed s/lcg// | grep sge`
+if [ "X$JOB_MANAGER_SET" != "Xsge" ]; then
+	yaimlog ABORT "JOB_MANAGER not set. It needs to know the JOB_MANAGER content to build static ldif files"
+	yaimlog ABORT "Set it to JOB_MANAGER=lcgsge (LCG-CE) or to JOB_MANAGER=sge (creamCE)"
+        exit 1 
+fi
+
+
+#*****************************************************************************************
+#***************************************** LCG-CE ****************************************
+#*****************************************************************************************
+
+if ( echo " ${NODE_TYPE_LIST} " | egrep -q "CE" ) && ( ! echo " ${NODE_TYPE_LIST} " | egrep -q 'creamCE' ); then
+	if [ "X$JOB_MANAGER" != "Xlcgsge" ]; then
+		yaimlog ABORT "JOB_MANAGER has an incorrect value. It should be lcgsge for a LCG-CE"
+		exit 1
+	fi
+fi
+
+#*****************************************************************************************
+#***************************************** CreamCE ***************************************
+#*****************************************************************************************
+if ( echo " ${NODE_TYPE_LIST} " | egrep -q "CE" ) && ( echo " ${NODE_TYPE_LIST} " | egrep -q 'creamCE' ); then
+	if [ "X$JOB_MANAGER" != "Xsge" ]; then
+        	yaimlog ABORT "JOB_MANAGER has an incorrect value. It should be sge for a creamCE"
+        	exit 1
+	fi
+fi
+
+
+#---*---
+
+###
+### Some General definitions
+###
+
+SGE_INFOPROVIDER_DIR=/etc/lrms
+SGE_INFOPROVIDER_DIRTMP=/tmp/sge/etc/lrms
+SGE_INFOPROVIDER_VQUEUES=${SGE_INFOPROVIDER_DIR}/vqueues.conf
+SGE_INFOPROVIDER_CLUSTER=${SGE_INFOPROVIDER_DIR}/cluster.state
+SGE_INFOPROVIDER_REPORTER=${SGE_INFOPROVIDER_DIR}/sge.conf
+
+GLITE_CREAM_LOCATION_GIP=/var/lib/bdii/gip
+GLITE_CREAM_LIBEXEC=/usr/libexec
+
+CE_PLUGIN_FILE=${GLITE_CREAM_LOCATION_GIP}/plugin/glite-info-dynamic-ce
+PLUGIN=${GLITE_CREAM_LIBEXEC}/glite-info-dynamic-sge
+CONF_FILE=${SGE_INFOPROVIDER_DIR}/scheduler.conf
+
+if [ ! -d ${SGE_INFOPROVIDER_DIR} ]; then
+   mkdir ${SGE_INFOPROVIDER_DIR}
+fi
+
+if [ ! -d ${SGE_INFOPROVIDER_DIRTMP} ]; then
+     mkdir -p ${SGE_INFOPROVIDER_DIRTMP}
+     chmod 700 ${SGE_INFOPROVIDER_DIRTMP}
+fi
+
+#---*---
+
+
+###
+### General checks regarding Information Plugin
+###
+
+yaimlog INFO "Build InfoProvider based on LeSC implementation"
+
+SGE_INFOPROVIDER=${GLITE_CREAM_LIBEXEC}/glite-info-dynamic-sge
+
+if [ ! -e ${SGE_INFOPROVIDER} ]; then
+   yaimlog ABORT "SGE InfoProvider is not installed !!! Without it the information system will not work ! Exiting ... "
+   exit 1
+fi
+
+if [ -e ${SGE_INFOPROVIDER}.rpmnew ]; then
+   yaimlog WARNING "New ${SGE_INFOPROVIDER} is deployed as .rpmnew in order to not overright your IP changes. Old ${SGE_INFOPROVIDER} is still in place."
+fi
+
+if [ -e ${SGE_INFOPROVIDER}.rpmsave ]; then
+   yaimlog WARNING "Previous ${SGE_INFOPROVIDER} is saved as .rpmsave. New ${SGE_INFOPROVIDER} is in place."
+fi
+
+yaimlog DEBUG "Check ${SGE_INFOPROVIDER} file permissions"
+
+if [ -x ${SGE_INFOPROVIDER} ]; then
+     yaimlog DEBUG "${SGE_INFOPROVIDER} has correct permissions"
+else
+     yaimlog WARNING "${SGE_INFOPROVIDER} does not have the correct permissions. Changing them ..."
+     chmod 755 $SGE_INFOPROVIDER
+fi
+
+
+#---*---
+
+
+###
+### Build /etc/lrms/vqueues.conf
+###
+
+yaimlog DEBUG "Creating ${SGE_INFOPROVIDER_VQUEUES} file..."
+
+if [ -e ${SGE_INFOPROVIDER_VQUEUES} ]; then
+   yaimlog WARNING "${SGE_INFOPROVIDER_VQUEUES} exists and will be copied to ${SGE_INFOPROVIDER_DIRTMP}/vqueues.conf!"
+   cp -f ${SGE_INFOPROVIDER_VQUEUES} ${SGE_INFOPROVIDER_DIRTMP}/
+fi
+
+cat <<EOF_SGE_INFOPROVIDER_VQUEUES > ${SGE_INFOPROVIDER_VQUEUES}
+#
+# SGE JobManager queue mapping file
+#
+# Virtual
+# Queue         Property                New Value
+# --------------------------------------------------
+EOF_SGE_INFOPROVIDER_VQUEUES
+
+for QUEUE in `echo $QUEUES | sed 's/"//g'` ; do
+   cat <<EOF_SGE_INFOPROVIDER_VQUEUES >> $SGE_INFOPROVIDER_VQUEUES
+$QUEUE          queue                   $QUEUE
+EOF_SGE_INFOPROVIDER_VQUEUES
+done
+
+chmod 644 ${SGE_INFOPROVIDER_VQUEUES}
+
+
+#---*---
+
+
+###
+### Build /etc/lrms/cluster.state file
+###
+
+yaimlog DEBUG "Set Cluster status to Production in $SGE_INFOPROVIDER_CLUSTER"
+
+if [ -e ${SGE_INFOPROVIDER_CLUSTER} ]; then
+   yaimlog WARNING "${SGE_INFOPROVIDER_CLUSTER} exists and will be copied to ${SGE_INFOPROVIDER_DIRTMP}/cluster.state!"
+   cp -f ${SGE_INFOPROVIDER_CLUSTER} ${SGE_INFOPROVIDER_DIRTMP}/
+fi
+
+cat <<EOF_SGE_INFOPROVIDER_CLUSTER > ${SGE_INFOPROVIDER_CLUSTER}
+Production
+EOF_SGE_INFOPROVIDER_CLUSTER
+
+chmod 644 ${SGE_INFOPROVIDER_CLUSTER}
+
+#---*---
+
+
+###
+### Build /etc/lrms/sge.conf file
+###
+
+yaimlog DEBUG "Creating $SGE_INFOPROVIDER_REPORTER file..."
+
+if [ "x${CREAM_CLUSTER_MODE}" = "xyes" ]; then
+  glueformat="glue1"
+else
+  glueformat="both"
+fi
+
+if [ -e ${SGE_INFOPROVIDER_REPORTER} ]; then
+   yaimlog WARNING "${SGE_INFOPROVIDER_REPORTER} exists and will be copied to ${SGE_INFOPROVIDER_DIRTMP}/sge.conf!"
+   cp -f ${SGE_INFOPROVIDER_REPORTER} ${SGE_INFOPROVIDER_DIRTMP}/
+fi
+
+cat <<EOF_SGE_INFOPROVIDER_REPORTER > ${SGE_INFOPROVIDER_REPORTER}
+#
+# Sample configuration file for SGE information reporter
+# ======================================================
+SGE_ROOT = ${SGE_ROOT}
+SGE_ARCH = `${SGE_ROOT}/util/arch`
+SGE_CELL = ${SGE_CELL}
+vqueue_file = ${SGE_INFOPROVIDER_VQUEUES}
+state_file = ${SGE_INFOPROVIDER_CLUSTER}
+qstat_command = $SGE_ROOT/bin/`$SGE_ROOT/util/arch`/qstat
+qconf_command = $SGE_ROOT/bin/`$SGE_ROOT/util/arch`/qconf
+glue1-static-file-CE                = ${GLITE_CREAM_LOCATION_GIP}/ldif/static-file-CE.ldif
+glue2-static-file-computing-manager = ${GLITE_CREAM_LOCATION_GIP}/ldif/ComputingManager.ldif
+glue2-static-file-computing-share   = ${GLITE_CREAM_LOCATION_GIP}/ldif/ComputingShare.ldif
+outputformat                        = ${glueformat}
+EOF_SGE_INFOPROVIDER_REPORTER
+
+chmod 644 ${SGE_INFOPROVIDER_REPORTER}
+
+
+#---*---
+
+
+###
+### Set /var/lib/bdii/gip/plugin/glite-info-dynamic-ce
+###
+
+yaimlog DEBUG "Configure SGE dynamic information plugin: ${CE_PLUGIN_FILE}"
+
+cat <<EOF_CE_PLUGIN_FILE > ${CE_PLUGIN_FILE}
+#!/bin/sh
+${GLITE_CREAM_LIBEXEC}/glite-ce-check-submission-state /etc/glite-ce-dbtool/creamdb_min_access.conf
+retcode=\$?
+if [ \$retcode = 1 ] || [ \$retcode = 2 ] ; then
+  # Submissions disabled. Publish Draining
+  $PLUGIN --info -c $CONF_FILE | sed -e 's/GlueCEStateStatus: Production/GlueCEStateStatus: Draining/'
+else 
+  # Submissions enabled. The default cluster.state will be used
+  $PLUGIN --info -c $CONF_FILE
+fi
+EOF_CE_PLUGIN_FILE
+
+yaimlog DEBUG "Set proper permissions to ${CE_PLUGIN_FILE}"
+chmod +x ${CE_PLUGIN_FILE}
+
+
+#---*---
+
+
+###
+### SGE Configure /etc/lrms/scheduler.conf
+###
+if [ ! -e ${CONF_FILE} ]; then
+     yaimlog ABORT " The ${CONF_FILE} does not exist. Aborting..."
+     exit 1
+fi
+
+if [ -e ${CONF_FILE} ]; then
+   yaimlog WARNING "${CONF_FILE} exists and will be copied to ${SGE_INFOPROVIDER_DIRTMP}/scheduler.conf!"
+   cp -f ${CONF_FILE} ${SGE_INFOPROVIDER_DIRTMP}/
+fi
+
+yaimlog DEBUG "Create ERT configuration" 
+####@ Create ERT configuration
+ 
+cat <<EOF >> /etc/lrms/scheduler.conf
+module_search_path : ../lrms:../ett
+[LRMS]
+lrms_backend_cmd: $PLUGIN --lrmsinfo -c ${CONF_FILE}
+[Scheduler]
+cycle_time : 0
+vo_max_jobs_cmd: $PLUGIN --vomaxjobs -c ${CONF_FILE}
+EOF
+
+return 0
+
+}
+

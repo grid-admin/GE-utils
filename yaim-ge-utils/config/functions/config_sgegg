@@ -1,0 +1,371 @@
+###############################################################################
+# Copyright (c) Members of the EGEE Collaboration. 2004.
+# See http://www.eu-egee.org/partners/ for details on the copyright holders.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+###############################################################################
+#
+# NAME        : config_sgegg
+#
+# DESCRIPTION : This function implements the SGE integration with the Grid Gateway
+#
+# AUTHORS     : goncalo@lip.pt,ge-support@listas.cesga.es
+#
+# NOTES       : 
+#
+# YAIM MODULE : glite-yaim-sge-utils
+#
+###############################################################################
+
+
+function config_sgegg_check(){
+    requires $1 SGE_ROOT SGE_CELL CE_BATCH_SYS BATCH_BIN_DIR GLITE_LOCATION GLITE_LOCATION_LOG 
+    return $?
+}
+
+
+function config_sgegg_setenv(){
+    return 0
+}
+
+
+function config_sgegg(){
+
+INSTALL_ROOT=${INSTALL_ROOT:-/opt}
+
+###
+### Get gLite version
+###
+
+yaimlog DEBUG "Getting EMI version... "
+
+emi_version=/etc/emi-version
+
+if [ ! -e ${emi_version} ]; then
+    yaimlog ABORT "EMI version not found Exiting..."
+    exit 1
+fi
+
+yaimlog DEBUG "Running SGE Grid Gateway configuration for gLite version $emi_version!"
+
+#*****************************************************************************************
+#***************************************** CreamCE ***************************************
+#*****************************************************************************************
+
+
+if ( echo " ${NODE_TYPE_LIST} " | egrep -q "CE" ) && ( echo " ${NODE_TYPE_LIST} " | egrep -q 'creamCE' ); then
+
+###
+### Check if sge scripts and BUPDATER are installed
+###
+	SGE_CREAM_BIN_DIR="/usr/libexec"
+
+        for sge_scripts in BUpdaterSGE sge_helper sge_cancel.sh sge_hold.sh \
+            sge_resume.sh sge_status.sh sge_submit.sh BNotifier; do
+            sge_file="${SGE_CREAM_BIN_DIR}/${sge_scripts}"
+            if [ ! -e ${sge_file} ]; then
+                yaimlog ABORT "${sge_file} doesn't exist. Is glite-ce-blahp rpm installed? Exiting ..."
+                exit 1
+            fi 
+        done  
+
+###
+### Variables setup for blahp.log
+###
+        BLPARSER_WITH_UPDATER_NOTIFIER=true
+
+	SCRIPT="/etc/blah.config"
+
+        yaimlog DEBUG "Backup $SCRIPT to $SCRIPT.old"
+
+	# backup old file
+	SCRIPT=/etc/blah.config
+  	if [ -f $SCRIPT ]; then
+    		cp $SCRIPT $SCRIPT.old
+  	fi 
+
+  	# local variables definition
+	mkdir -p /var/log/cream/accounting
+	chown root.${TOMCAT_USER} /var/log/cream/accounting
+	chmod 0730 /var/log/cream/accounting
+
+        yaimlog DEBUG "Set up variables to fill $SCRIPT..."
+
+	blah_lrms=sge
+	blah_accounting_log=/var/log/cream/accounting/blahp.log
+  	blah_bin=${BATCH_BIN_DIR}
+  	blah_conf=
+  	blah_spool=${BATCH_LOG_DIR}
+  	blah_nochecksubmission=yes
+  	blah_nologaccess=
+  	blah_fallback=no
+  	blah_blp=yes
+  	blah_blp_server=
+  	blah_blp_port=
+  	blah_blp_num=
+  	blah_blp_server1=
+  	blah_blp_server2=
+  	blah_blp_port1=
+  	blah_blp_port2=
+  	row_to_add=""
+ 
+	 # New parser
+	bupdater_bin_path=/usr/libexec/BUpdaterSGE
+
+
+# ---*---
+
+
+###
+### Start building blahp.log
+###
+
+        yaimlog DEBUG "Start building $SCRIPT..."
+
+  	cat << EOF > $SCRIPT 
+# Supported batch systems
+supported_lrms=$blah_lrms
+
+blah_child_poll_timeout=200 
+
+${row_to_add}
+
+# Needed to implement the short term solution for proxy renewal (savannah task #8176) 
+blah_disable_wn_proxy_renewal=yes 
+
+# DGAS logfile 
+BLAHPD_ACCOUNTING_INFO_LOG=$blah_accounting_log
+
+# Path where ${blah_lrms} executables are located 
+${blah_lrms}_binpath=$blah_bin
+
+# Path where the ${blah_lrms} conf file is located
+${blah_lrms}_confpath=$blah_conf
+
+# Path where the ${blah_lrms} logs are located
+${blah_lrms}_spoolpath=$blah_spool
+
+# If it is set to yes blah does not check the jobid in the logfiles
+${blah_lrms}_nochecksubmission=$blah_nochecksubmission
+
+# If it is set to yes blah does NOT use log files to get job status, 
+# but uses only standard LRMS query
+${blah_lrms}_nologaccess=$blah_nologaccess
+
+# If it is set to no blah scripts for ${blah_lrms} will not try to read 
+# locally from the logs if BLParser is not present
+${blah_lrms}_fallback=$blah_fallback
+
+# Set to yes to use Blah Log Parser for ${blah_lrms}
+${blah_lrms}_BLParser=$blah_blp
+
+# Host where Blah Log Parser for ${blah_lrms} is running
+${blah_lrms}_BLPserver=$blah_blp_server
+
+# Port where Blah Log Parser for ${blah_lrms} is running
+${blah_lrms}_BLPport=$blah_blp_port
+
+# Number of Blah Log Parser to try for ${blah_lrms}
+# (if it is null ${blah_lrms}_BLPserver and ${blah_lrms}_BLPport are used)
+${blah_lrms}_num_BLParser=$blah_blp_num
+
+${blah_lrms}_BLPserver1=$blah_blp_server1
+${blah_lrms}_BLPport1=$blah_blp_port1
+
+${blah_lrms}_BLPserver2=$blah_blp_server2
+${blah_lrms}_BLPport2=$blah_blp_port2
+
+${blah_lrms}_rootpath=$SGE_ROOT
+${blah_lrms}_cellname=$SGE_CELL
+#${blah_lrms}_helperpath=/opt/glite/bin/sge_helper
+#${blah_lrms}_helperpath=/usr/bin/sge_helper
+EOF
+
+
+# ---*---
+
+
+###
+### Continue building blahp.log
+### Important info must be added if BLPARSER is not used
+### but BNOTIFIER is used instead 
+###
+
+	if [ "X${BLPARSER_WITH_UPDATER_NOTIFIER}" == "Xtrue" ]; then
+
+                yaimlog DEBUG "Append BNotifier definitions to $SCRIPT..."
+
+    		if [ ! -f /var/blah ]; then
+      			mkdir -p /var/blah
+      			chown tomcat.tomcat /var/blah
+      			chmod 771 /var/blah
+    		fi
+    		cat << EOF >> $SCRIPT
+# New parser section
+job_registry=/var/tmp/cream_tomcat_registry.db
+async_notification_port=33329
+async_notification_host=localhost
+
+# about 2 months of purge interval.
+purge_interval=5000000
+
+#Updater location
+bupdater_path=/usr/libexec/BUpdaterSGE
+
+#Notifier location
+bnotifier_path=${GLITE_LOCATION}/libexec/BNotifier
+
+#Updater pid file
+bupdater_pidfile=/var/tmp/cream_tomcat_bupdater.pid
+
+#Notifier pid file
+bnotifier_pidfile=/var/tmp/cream_tomcat_bnotifier.pid
+
+#Updater debug level
+bupdater_debug_level=2
+
+#Updater debug log file
+#bupdater_debug_logfile=${GLITE_LOCATION_VAR}/log/glite-ce-bupdater.log
+bupdater_debug_logfile=/var/log/cream/glite-ce-bupdater.log
+
+#Notifier debug level
+bnotifier_debug_level=2
+
+#Notifier debug log file
+#bnotifier_debug_logfile=${GLITE_LOCATION_VAR}/log/glite-ce-bnotifier.log
+bnotifier_debug_logfile=/var/log/cream/glite-ce-bnotifier.log
+
+blah_children_restart_interval=0
+
+# Following email from M. Sgaravatto 
+# Subject: Changes needed in blah.config for CREAM CE v. 1.6
+# Date: 21/12/2009 
+blah_disable_proxy_user_copy=yes
+blah_id_mapping_command_sudo="/usr/bin/sudo -H"
+blah_set_default_workdir_to_home=yes 
+
+EOF
+	fi
+
+
+# ---*---
+
+
+###
+### /etc/logrotate.d/blahp-logrotate - BEGIN
+###
+
+	SCRIPT=/etc/logrotate.d/blahp-logrotate
+
+        yaimlog DEBUG "Set up $SCRIPT..."
+
+  	cat << EOF > $SCRIPT
+#${GLITE_LOCATION_LOG}/accounting/blahp.log {
+/var/log/cream/accounting/blahp.log {
+        copytruncate
+        rotate 50
+        size = 10M
+        missingok
+        nomail
+}
+EOF
+
+
+# ---*---
+
+
+###
+### /etc/logrotate.d/bupdater-logrotate
+### /etc/logrotate.d/bnotifier-logrotate
+###
+
+	if [ "X${BLPARSER_WITH_UPDATER_NOTIFIER}" == "Xtrue" ]; then
+  		SCRIPT=/etc/logrotate.d/bupdater-logrotate
+
+		yaimlog DEBUG "Set up $SCRIPT..."
+
+    		cat << EOF > $SCRIPT
+#${GLITE_LOCATION_LOG}/glite-ce-bupdater.log {
+/var/log/cream/glite-ce-bupdater.log {
+        copytruncate
+        rotate 50
+        size = 10M
+        missingok
+        nomail
+}
+EOF
+  		SCRIPT=/etc/logrotate.d/bnotifier-logrotate
+
+		yaimlog DEBUG "Set up $SCRIPT..."
+
+    		cat << EOF > $SCRIPT
+#${GLITE_LOCATION_LOG}/glite-ce-bnotifier.log
+/var/log/cream/glite-ce-bnotifier.log    
+ {
+        copytruncate
+        rotate 50
+        size = 10M
+        missingok
+        nomail
+}
+EOF
+
+	fi
+
+###
+### Set hourly cron for logrotate
+###
+	if [[ ! -f /etc/cron.hourly/logrotate ]]; then
+    		mv -f `find /etc -name logrotate` /etc/cron.hourly/
+  	fi
+
+
+#---*---
+
+
+###
+### Check content of /opt/glite/etc/lcas/lcas-suexec.db
+###
+
+	#LCAS_SUEXEC_DB="${GLITE_LOCATION}/etc/lcas/lcas-suexec.db"
+	LCAS_SUEXEC_DB="/etc/lcas/lcas-suexec.db"
+	moddir="/opt/glite/lib64/modules"
+	my_batch_sys="sge"
+
+	for sge_blah_script in ${my_batch_sys}_status.sh ${my_batch_sys}_cancel.sh \
+            ${my_batch_sys}_hold.sh ${my_batch_sys}_resume.sh ${my_batch_sys}_submit.sh; do 
+        	#LCAS_SUEXEC_DB_EMPTY=`cat $LCAS_SUEXEC_DB | grep "${GLITE_LOCATION}/bin/$sge_blah_script"`
+		LCAS_SUEXEC_DB_EMPTY=`cat $LCAS_SUEXEC_DB | grep "/usr/libexec/$sge_blah_script"`
+        	if [ "X$LCAS_SUEXEC_DB_EMPTY" == "X" ]; then
+             		break
+        	fi
+	done
+
+	if [ "X$LCAS_SUEXEC_DB_EMPTY" == "X" ]; then
+        	if [ -f $LCAS_SUEXEC_DB ]; then
+                	cp $LCAS_SUEXEC_DB $LCAS_SUEXEC_DB.old
+        	fi
+
+        	cat << EOF > $LCAS_SUEXEC_DB
+pluginname=${moddir}/lcas_voms.mod,pluginargs="-vomsdir /etc/grid-security/vomsdir/ -certdir /etc/grid-security/certificates -authfile ${GRIDMAPFILE} -authformat simple -use_user_dn"
+#pluginname=${moddir}/lcas_check_executable.mod,pluginargs="-exec /bin/pwd:/bin/echo:/usr/bin/readlink:/bin/kill:${GLITE_LOCATION}/bin/BPRclient:/bin/rm:/bin/cp:/usr/bin/id:/bin/cat:/usr/bin/groups:/usr/bin/whoami:${GLITE_LOCATION}/etc/glite-ce-cream/cream-glexec.sh:${GLITE_LOCATION}/bin/blah_job_registry_lkup:${GLITE_LOCATION}/bin/${my_batch_sys}_submit.sh:${GLITE_LOCATION}/bin/${my_batch_sys}_status.sh:${GLITE_LOCATION}/bin/${my_batch_sys}_cancel.sh:${GLITE_LOCATION}/bin/${my_batch_sys}_hold.sh:${GLITE_LOCATION}/bin/${my_batch_sys}_resume.sh:${GLITE_LOCATION}/bin/glite-cream-createsandboxdir"
+pluginname=${moddir}/lcas_check_executable.mod,pluginargs="-exec /bin/pwd:/bin/echo:/usr/bin/readlink:/bin/kill:/usr/libexec/BPRclient:/bin/rm:/bin/cp:/usr/bin/id:/bin/cat:/usr/bin/groups:/usr/bin/whoami:/usr/etc/glite-ce-cream/cream-glexec.sh:/usr/sbin/blah_job_registry_lkup::/usr/libexec/${my_batch_sys}_submit.sh:/usr/libexec/${my_batch_sys}_status.sh:/usr/libexec/${my_batch_sys}_cancel.sh:/usr/libexec/${my_batch_sys}_hold.sh:/usr/libexec/${my_batch_sys}_resume.sh:/usr/bin/glite-cream-createsandboxdir"
+EOF
+	fi
+
+fi
+
+return 0
+
+}
+

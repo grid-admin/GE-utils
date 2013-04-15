@@ -1,0 +1,5 @@
+###########################################  
+# Specific node services file 
+# Overwrites the default values in defaults
+# New env variables can be defined
+############################################

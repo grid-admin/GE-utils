@@ -1,0 +1,381 @@
+###############################################################################
+# Copyright (c) Members of the EGEE Collaboration. 2004.
+# See http://www.eu-egee.org/partners/ for details on the copyright holders.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+###############################################################################
+#
+# NAME        : config_sgeenv
+#
+# DESCRIPTION : This function configures SGE environment
+#
+# AUTHORS     : goncalo@lip.pt,ge-support@listas.cesga.es
+#
+# NOTES       :
+#
+# YAIM MODULE : glite-yaim-sge-utils, glite-yaim-sge-server, glite-yaim-sge-client
+#
+###############################################################################
+
+
+function config_sgeenv_check(){
+    requires $1 SGE_ROOT SGE_CELL SGE_QMASTER SGE_EXECD SGE_SPOOL_METH SGE_CLUSTER_NAME SGE_SHARED_INSTALL BATCH_SERVER MY_DOMAIN
+    return $?
+}
+
+
+function config_sgeenv_setenv(){
+    return 0
+}
+
+
+function config_sgeenv(){
+
+if [ "X$SGE_SHARED_INSTALL" == "Xno" ]; then
+
+###
+### Create SGE dir structure for client
+###
+
+	yaimlog DEBUG "Building SGE directories under ${SGE_ROOT}/${SGE_CELL}"
+
+	if [ ! -d ${SGE_ROOT} ]; then
+             yaimlog ABORT "${SGE_ROOT} doesn't exist. Is SGE installed under ${SGE_ROOT}? Please Check!!! Exiting..."  
+   	     exit 1
+	fi
+
+	if [ ! -d ${SGE_ROOT}/${SGE_CELL} ]; then
+   	     yaimlog WARNING "${SGE_ROOT}/${SGE_CELL} doesn't exist. Probably SGE is installed but not configured yet..."
+   	     yaimlog INFO "Making ${SGE_ROOT}/${SGE_CELL}/common ..."
+   	     mkdir -p ${SGE_ROOT}/${SGE_CELL}/common
+	else
+   	     if [ ! -d ${SGE_ROOT}/${SGE_CELL}/common ]; then
+        	  yaimlog INFO "Making ${SGE_ROOT}/${SGE_CELL}/common ..."
+        	  mkdir ${SGE_ROOT}/${SGE_CELL}/common
+   	     fi
+	fi
+
+
+#---*---
+
+
+###
+### Create bootstrap file
+###
+
+	if [ "X$SGE_SPOOL_METH" == "Xclassic" ]; then
+     	     SGE_SPOOL_LIB=libspoolc
+     	     SGE_SPOOL_PAR="${SGE_ROOT}/${SGE_CELL}/common;${SGE_ROOT}/${SGE_CELL}/spool/qmaster"
+	else
+     	     yaimlog ABORT "YAIM only supports the SGE classic spooling! Check your SGE_SPOOL_METH definition."
+     	     exit 1
+	fi
+
+	BOOTSTRAP_FILE=${SGE_ROOT}/${SGE_CELL}/common/bootstrap
+	yaimlog DEBUG "Configuring SGE ${BOOTSTRAP_FILE} file"
+	if [ -e ${BOOTSTRAP_FILE} ]; then
+     	     yaimlog DEBUG "${BOOTSTRAP_FILE} exists! It will be overwritten with your current definitions"
+	fi
+
+	cat <<EOF_BOOTSTRAP_FILE > ${BOOTSTRAP_FILE}
+admin_user        none
+default_domain    ${MY_DOMAIN}
+ignore_fqdn       true
+spooling_method   ${SGE_SPOOL_METH}
+spooling_lib      ${SGE_SPOOL_LIB}
+spooling_params   ${SGE_SPOOL_PAR}
+binary_path       ${SGE_ROOT}/bin
+qmaster_spool_dir ${SGE_ROOT}/${SGE_CELL}/spool/qmaster
+security_mode     none
+EOF_BOOTSTRAP_FILE
+
+
+#---*---
+
+
+###
+### Create act_qmaster file
+###
+
+	ACT_QMASTER_FILE=${SGE_ROOT}/${SGE_CELL}/common/act_qmaster
+	yaimlog DEBUG "Configuring SGE ${ACT_QMASTER_FILE} file"
+	if [ -e ${ACT_QMASTER_FILE} ]; then
+   	     OLD_BATCH_SERVER=`cat ${ACT_QMASTER_FILE}`
+   	     yaimlog DEBUG "${ACT_QMASTER_FILE} exists! New value (${BATCH_SERVER}) will overwrite old value (${OLD_BATCH_SERVER})"
+	fi
+	cat <<EOF_ACT_QMASTER_FILE > ${ACT_QMASTER_FILE}
+${BATCH_SERVER}
+EOF_ACT_QMASTER_FILE
+
+
+#---*---
+
+
+###
+### Create ${SGE_ROOT}/${SGE_CELL}/common/settings.sh
+###
+
+	SGE_SHSETTING_FILE=${SGE_ROOT}/${SGE_CELL}/common/settings.sh
+	yaimlog DEBUG "Check if ${SGE_SHSETTING_FILE} exists!"
+	if [ -e ${SGE_SHSETTING_FILE} ]; then
+     	     yaimlog DEBUG "${SGE_SHSETTING_FILE} exists. It will be overwritten with your current definitions."
+	fi
+
+	cat <<EOF_SGE_SHSETTING_FILE > ${SGE_SHSETTING_FILE}
+#!/bin/bash
+SGE_ROOT=${SGE_ROOT}; export SGE_ROOT
+ARCH=\`\$SGE_ROOT/util/arch\`
+DEFAULTMANPATH=\`\$SGE_ROOT/util/arch -m\`
+MANTYPE=\`\$SGE_ROOT/util/arch -mt\`
+SGE_CELL=${SGE_CELL}; export SGE_CELL
+SGE_CLUSTER_NAME=${SGE_CLUSTER_NAME}; export SGE_CLUSTER_NAME
+SGE_QMASTER=${SGE_QMASTER}; export SGE_QMASTER
+SGE_EXECD=${SGE_EXECD}; export SGE_EXECD
+if [ "\$MANPATH" = "" ]; then
+        MANPATH=\$DEFAULTMANPATH
+fi
+MANPATH=\$SGE_ROOT/\$MANTYPE:\$MANPATH; export MANPATH
+PATH=\$SGE_ROOT/bin/\$ARCH:\$PATH; export PATH
+shlib_path_name=\`\$SGE_ROOT/util/arch -lib\`
+old_value=\`eval echo '\$'\$shlib_path_name\`
+if [ x\$old_value = x ]; then
+        eval \$shlib_path_name=\$SGE_ROOT/lib/\$ARCH
+else
+        eval \$shlib_path_name=\$SGE_ROOT/lib/\$ARCH:\$old_value
+fi
+export \$shlib_path_name
+unset ARCH DEFAULTMANPATH MANTYPE shlib_path_name
+EOF_SGE_SHSETTING_FILE
+
+	chmod 644 ${SGE_SHSETTING_FILE}
+
+
+#---*---
+
+
+###
+### Create ${SGE_ROOT}/${SGE_CELL}/common/settings.csh
+###
+
+	SGE_CSHSETTING_FILE=${SGE_ROOT}/${SGE_CELL}/common/settings.csh
+	yaimlog DEBUG "Check if ${SGE_CSHSETTING_FILE} exists. If not, create it!"
+	if [ -e ${SGE_CSHSETTING_FILE} ]; then
+     	     yaimlog DEBUG "${SGE_CSHSETTING_FILE} exists. It will be overwritten with your current definitions."
+	fi
+
+	cat <<EOF_SGE_CSHSETTING_FILE > ${SGE_CSHSETTING_FILE}
+#!/bin/tcsh
+setenv SGE_ROOT ${SGE_ROOT}
+set ARCH=\`\$SGE_ROOT/util/arch\`
+set DEFAULTMANPATH=\`\$SGE_ROOT/util/arch -m\`
+set MANTYPE=\`\$SGE_ROOT/util/arch -mt\`
+setenv SGE_CELL ${SGE_CELL}
+setenv SGE_CLUSTER_NAME ${SGE_CLUSTER_NAME}
+# unsetenv SGE_QMASTER
+# unsetenv SGE_EXECD
+setenv SGE_QMASTER ${SGE_QMASTER}
+setenv SGE_EXECD ${SGE_EXECD}
+if ( \$?MANPATH == 1 ) then
+   setenv MANPATH \$SGE_ROOT/\${MANTYPE}:\$MANPATH
+else
+   setenv MANPATH \$SGE_ROOT/\${MANTYPE}:\$DEFAULTMANPATH
+endif
+set path=( \$SGE_ROOT/bin/\$ARCH \$path )
+set shlib_path_name=\`\$SGE_ROOT/util/arch -lib\`
+if ( \`eval echo '\$?'\$shlib_path_name\` ) then
+   set old_value=\`eval echo '\$'\$shlib_path_name\`
+   setenv \$shlib_path_name "\$SGE_ROOT/lib/\$ARCH":"\$old_value"
+else
+   setenv \$shlib_path_name \$SGE_ROOT/lib/\$ARCH
+endif
+unset ARCH DEFAULTMANPATH MANTYPE shlib_path_name
+EOF_SGE_CSHSETTING_FILE
+
+	chmod 644 ${SGE_CSHSETTING_FILE}
+
+
+#---*---
+
+
+###
+### Create /etc/profile.d/sge.sh
+###
+
+	yaimlog INFO "Build the scripts which set the proper SGE environment"
+	SGE_SHENV_FILE=/etc/profile.d/sge.sh
+	yaimlog DEBUG "Create $SGE_SHENV_FILE file"
+	if [ -e ${SGE_SHENV_FILE} ]; then
+   	     yaimlog DEBUG "${SGE_SHENV_FILE} exists. It will be overwritten with your current definitions."
+	fi
+
+	cat <<EOF_SGE_SHENV_FILE > ${SGE_SHENV_FILE}
+# Define SGE_ROOT directory and SGE commands
+export SGE_ROOT=${SGE_ROOT}
+export SGE_CELL=${SGE_CELL}
+. ${SGE_ROOT}/${SGE_CELL}/common/settings.sh
+EOF_SGE_SHENV_FILE
+
+	chmod 644 ${SGE_SHENV_FILE}
+	source ${SGE_SHENV_FILE}
+
+
+#---*---
+
+
+###
+### Create /etc/profile.d/sge.csh
+###
+
+	SGE_CSHENV_FILE=/etc/profile.d/sge.csh
+	yaimlog DEBUG "Create $SGE_CSHENV_FILE file"
+	if [ -e ${SGE_CSHENV_FILE} ]; then
+   	     yaimlog DEBUG "${SGE_CSHENV_FILE} exists. It will be overwritten with your current definitions."
+	fi
+
+	cat <<EOF_SGE_CSHENV_FILE > ${SGE_CSHENV_FILE}
+# Define SGE_ROOT directory and SGE commands
+setenv SGE_ROOT "${SGE_ROOT}"
+setenv SGE_CELL "${SGE_CELL}"
+source ${SGE_ROOT}/${SGE_CELL}/common/settings.csh
+EOF_SGE_CSHENV_FILE
+
+	chmod 644 ${SGE_CSHENV_FILE}
+
+
+#---*---
+
+
+###
+### Setting up service file
+###
+
+	SERVICES_FILE="/etc/services"
+	yaimlog DEBUG "Modify ${SERVICES_FILE} file and add the appropriate ports for SGE daemons"
+
+	PORT1=`grep "[^0-9]${SGE_QMASTER}/tcp" ${SERVICES_FILE} | grep -v sge` 
+	if [ "X${PORT1}" != "X" ]; then
+	    yaimlog WARNING "Port ${SGE_QMASTER}/tcp is already defined by other service. ${SERVICES_FILE} will be replaced, old file ${SERVICES_FILE}.old"
+	    if [ ! -e ${SERVICES_FILE}.old ]; then
+		cp ${SERVICES_FILE} ${SERVICES_FILE}.old
+	    fi
+	    SERV=`grep "\b${PORT1}/tcp\b" services | awk '{print $1}'`
+	    sed -i "s/${SERV}/sge_qmaster/g" ${SERVICES_FILE}
+	fi
+	VAR1=`grep ^sge_qmaster ${SERVICES_FILE} | awk '{print $2}'`
+	if [ "X${VAR1}" == "X" ]; then
+     	     yaimlog INFO "Adding sge_qmaster in $SERVICES_FILE"
+     	     echo "sge_qmaster     ${SGE_QMASTER}/tcp           # tcp port for SGE Qmaster daemon" >> ${SERVICES_FILE}
+	else
+     	     if [ "X${VAR1}" != "X${SGE_QMASTER}/tcp" ]; then
+                  yaimlog WARNING "sge_qmaster already defined in $SERVICES_FILE on port $VAR1 and different from ${SGE_QMASTER}/tcp. Overwrite sge_qmaster port in $SERVICES_FILE using ${SGE_QMASTER}/tcp port"
+                  VAR1=`echo $VAR1 | cut -f1 -d"/"`
+                  sed "s/${VAR1}\/tcp/${SGE_QMASTER}\/tcp/g" $SERVICES_FILE > $SERVICES_FILE.tmp
+        	  mv -f $SERVICES_FILE.tmp $SERVICES_FILE
+     	     fi
+	fi
+
+	PORT2=`grep "[^0-9]${SGE_EXECD}/tcp" ${SERVICES_FILE} | grep -v sge` 
+	if [ "X${PORT2}" != "X" ]; then
+	    yaimlog WARNING "Port ${SGE_EXECD}/tcp is already defined by other service. ${SERVICES_FILE} will be replaced, old file ${SERVICES_FILE}.old"
+	    if [ ! -e ${SERVICES_FILE}.old ]; then
+		cp ${SERVICES_FILE} ${SERVICES_FILE}.old
+	    fi
+	    cp ${SERVICES_FILE} ${SERVICES_FILE}.old
+	    SERV=`grep "\b${PORT2}/tcp\b" services | awk '{print $1}'`
+	    sed -i "s/${SERV}/sge_qmaster/g" ${SERVICES_FILE}
+	fi
+	VAR2=`grep ^sge_execd ${SERVICES_FILE} | awk '{print $2}'`
+	if [ "X${VAR2}" == "X" ]; then
+     	     yaimlog INFO "Adding sge_execd in ${SERVICES_FILE}"
+     	     echo "sge_execd       ${SGE_EXECD}/tcp           # tcp port for SGE execd service" >> ${SERVICES_FILE}
+	else
+     	     if [ "X${VAR2}" != "X${SGE_EXECD}/tcp" ]; then
+        	  yaimlog WARNING "sge_execd already defined in $SERVICES_FILE on port $VAR2 and different from ${SGE_EXECD}/tcp. Overwrite sge_execd port in $SERVICES_FILE using ${SGE_EXECD}/tcp port"
+        	  VAR2=`echo $VAR2 | cut -f1 -d"/"`
+        	  sed "s/${VAR2}\/tcp/${SGE_EXECD}\/tcp/g" $SERVICES_FILE > $SERVICES_FILE.tmp
+        	  mv -f $SERVICES_FILE.tmp $SERVICES_FILE
+     	     fi
+	fi
+else
+	yaimlog INFO "You are using a SGE SHARED INSTALLATION." 
+	yaimlog INFO "SGE instalation will not be configured since we assume everything is already working via the SHARED INSTALLATION!"
+fi
+
+#---*---
+
+
+###
+### Some changes were introduced in SGEV62u1
+### Therefore, we need to know the SGE version
+###
+
+	yaimlog DEBUG "Get SGE version and link SGE binaries to lx26-x86 (original compilation)"
+
+	ARCH=`$SGE_ROOT/util/arch`
+	if [ "X$ARCH" != "X" ]; then
+     	     QSTAT="${SGE_ROOT}/bin/$ARCH/qstat"
+	else
+     	     yaimlog ABORT "Unable to get machine arch..."
+     	     exit 1
+	fi
+
+	ARCH_DEFAULT="lx26-x86"
+	QSTAT_DEFAULT="${SGE_ROOT}/bin/${ARCH_DEFAULT}/qstat"
+
+	if [ "X$QSTAT" != "X$QSTAT_DEFAULT" ]; then
+     	     	if [ -x $QSTAT ]; then
+     	  	     SGE_VERSION=`$QSTAT -help | head -n 1 | cut -f2 -d ' ' | cut -f1 -d 'u'`
+     	     	elif [ -x $QSTAT_DEFAULT ]; then
+          	       ln -s $SGE_ROOT/bin/$ARCH_DEFAULT $SGE_ROOT/bin/$ARCH
+          	       ln -s $SGE_ROOT/utilbin/$ARCH_DEFAULT $SGE_ROOT/utilbin/$ARCH
+                       ln -s $SGE_ROOT/lib/$ARCH_DEFAULT $SGE_ROOT/lib/$ARCH         
+          	       SGE_VERSION=`$QSTAT_DEFAULT -help | head -n 1 | cut -f2 -d ' ' | cut -f1 -d 'u'`
+     		else
+          	       yaimlog ABORT "Unable to get SGE version running qstat. Is SGE client installed?..."
+     		fi
+	else
+     		SGE_VERSION=`$QSTAT -help | head -n 1 | cut -f2 -d ' ' | cut -f1 -d 'u'`
+	fi
+        SGEV62=`echo "$SGE_VERSION >= 6.2 " | bc`
+
+
+#---*---
+
+
+###
+### Create cluster file
+###
+
+	if [ "X${SGEV62}" == "X1" ]; then
+             CLUSTER_NAME_FILE=${SGE_ROOT}/${SGE_CELL}/common/cluster_name
+             yaimlog DEBUG "Configuring SGE ${CLUSTER_NAME_FILE} file"
+             if [ -e ${CLUSTER_NAME_FILE} ]; then
+                  OLD_CLUSTER_NAME=`cat ${CLUSTER_NAME_FILE}`
+                  if [ "X${OLD_CLUSTER_NAME}" != "X${SGE_CLUSTER_NAME}" ]; then
+                  yaimlog WARNING "${CLUSTER_NAME_FILE} exists! New value (${SGE_CLUSTER_NAME}) will overwrite old value (${OLD_CLUSTER_NAME})"
+                  cat <<EOF_CLUSTER_NAME_FILE > ${CLUSTER_NAME_FILE}
+${SGE_CLUSTER_NAME}
+EOF_CLUSTER_NAME_FILE
+
+             fi
+	fi
+
+else
+        yaimlog INFO "You are using a SGE SHARED INSTALLATION." 
+        yaimlog INFO "SGE instalation will not be configured since we assume everything is already working via the SHARED INSTALLATION!"
+fi
+
+
+return 0
+
+}

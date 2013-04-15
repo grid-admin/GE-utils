@@ -1,0 +1,285 @@
+###############################################################################
+# Copyright (c) Members of the EGEE Collaboration. 2004.
+# See http://www.eu-egee.org/partners/ for details on the copyright holders.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+###############################################################################
+#
+# NAME        : config_ssh_sge
+#
+# DESCRIPTION : This function enables an lcg-CE to work as a SGE submission host, 
+#               being able to query/interact with the SGE QMASTER host (which may 
+#               be working in a different machine)
+#
+# AUTHORS     : goncalo@lip.pt,ge-support@listas.cesga.es
+#
+# NOTES       : 
+#
+# YAIM MODULE : glite-yaim-sge-utils
+#
+###############################################################################
+
+
+function config_ssh_sge_check(){
+    requires $1 CE_HOST WN_LIST
+    return $?
+}
+
+
+function config_ssh_sge_setenv(){
+    return 0
+}
+
+
+function config_ssh_sge(){
+
+# This directories are not created by default in CreamCE
+# if [ ! -d /opt/edg/sbin ]; then
+#      mkdir -p /opt/edg/sbin
+# fi
+# 
+# if [ ! -d /opt/edg/etc ]; then
+#      mkdir -p /opt/edg/etc
+# fi
+#
+#---*---
+
+SHOSTS_FILE="/etc/ssh/shosts.equiv"
+KNOWNHOST_FILE="/etc/ssh/ssh_known_hosts"
+
+if [ ! -e $SHOSTS_FILE ]; then
+     yaimlog WARNING "$SHOSTS_FILE doesn't exist. Create it!"
+     touch $SHOSTS_FILE
+     chmod 644 $SHOSTS_FILE 	
+fi
+ 
+for host in `echo $CE_HOST; cat $WN_LIST`; do
+    match=`grep -i $host $SHOSTS_FILE`
+    if [ "X$match" == "X" ]; then
+         yaimlog DEBUG "Include $host in $SHOSTS_FILE"  
+         echo $host >> $SHOSTS_FILE
+    fi
+done
+
+if [ ! -e $KNOWNHOST_FILE ]; then
+     yaimlog WARNING "$KNOWNHOST_FILE doesn't exist. Create it!"
+     touch $KNOWNHOST_FILE
+     chmod 644 $KNOWNHOST_FILE     
+fi
+
+#---*---
+
+#SGE_KNOWNHOST_SCRIPT_CONF="/opt/edg/etc/edg-sge-knownhosts.conf"
+SGE_KNOWNHOST_SCRIPT_CONF="/etc/edg-sge-knownhosts.conf"
+yaimlog DEBUG "Building $SGE_KNOWNHOST_SCRIPT configuration file"
+
+if [ -e ${SGE_KNOWNHOST_SCRIPT_CONF} ]; then
+   count=`ls -tr ${SGE_KNOWNHOST_SCRIPT_CONF}.OLD* 2>/dev/null | tail -n 1 | cut -f4 -d"."`
+   if [ "X$count" == "X" ]; then
+       count=0
+   else
+       count=`expr $count + 1`
+   fi
+   mv -f ${SGE_KNOWNHOST_SCRIPT_CONF} ${SGE_KNOWNHOST_SCRIPT_CONF}.OLD.${count}
+fi
+
+WNLIST=(`cat $WN_LIST`)
+cat <<EOF_SGE_KNOWNHOST_SCRIPT_CONF > ${SGE_KNOWNHOST_SCRIPT_CONF}
+NODES = $CE_HOST ${WNLIST[*]}
+KEYTYPES = rsa1,rsa,dsa
+KNOWNHOSTS = $KNOWNHOST_FILE
+EOF_SGE_KNOWNHOST_SCRIPT_CONF
+
+if [ "X$count" != "X" ]; then 
+   diff ${SGE_KNOWNHOST_SCRIPT_CONF}.OLD.${count} ${SGE_KNOWNHOST_SCRIPT_CONF} > /dev/null 2>&1 
+fi
+if [ $? == 0 ]; then
+     rm -f ${SGE_KNOWNHOST_SCRIPT_CONF}.OLD.${count}
+else
+     yaimlog WARNING "${SGE_KNOWNHOST_SCRIPT_CONF} exists. Your old file will be saved as ${SGE_KNOWNHOST_SCRIPT_CONF}.OLD.${count}"
+fi
+
+count=""
+
+chmod 644  ${SGE_KNOWNHOST_SCRIPT_CONF}
+
+# ---*---
+
+#SGE_KNOWNHOST_SCRIPT=/opt/edg/sbin/edg-sge-knownhosts
+SGE_KNOWNHOST_SCRIPT=/usr/sbin/edg-sge-knownhosts
+yaimlog DEBUG "Building $SGE_KNOWNHOST_SCRIPT perl script"
+
+if [ -e ${SGE_KNOWNHOST_SCRIPT} ]; then
+   count=`ls -tr ${SGE_KNOWNHOST_SCRIPT}.OLD* 2>/dev/null | tail -n 1 | cut -f4 -d"."`
+   if [ "X$count" == "X" ]; then
+       count=0
+   else
+       count=`expr $count + 1`
+   fi
+   mv -f ${SGE_KNOWNHOST_SCRIPT} ${SGE_KNOWNHOST_SCRIPT}.OLD.${count}
+fi
+
+cat <<EOF_SGE_KNOWNHOST_SCRIPT > ${SGE_KNOWNHOST_SCRIPT}
+#!/usr/bin/perl -w
+
+use strict ;
+use Fcntl;
+use Socket;
+####################################################
+my \$configfile = '${SGE_KNOWNHOST_SCRIPT_CONF}' ;
+
+my \$specified ;  # Nodes that have specified manually.
+my \$types ;      # Types of ssh keys to collect(-t)
+my \$knownhosts ; # The path of known_hosts file.
+####################################################
+# Read the configuration file.
+open(CONFIG,"<\$configfile") || die "Could not open \$configfile: \$!\n" ;
+while(<CONFIG>) {
+  \$specified  = \$1  if (/^NODES\s*=\s*(.*)/)  ;
+  \$types      = \$1  if (/^KEYTYPES\s*=\s*(.*)/) ;
+  \$knownhosts = \$1  if (/^KNOWNHOSTS\s*=\s*(.*)/) ;
+}
+close(CONFIG) ;
+
+my @nodes = ();
+foreach (split(/\s+/,\$specified)) {
+  push(@nodes,\$_) ;
+}
+
+###################################################
+# Parse the current known host files and build a hash.
+my %known ;
+my %keys ;
+my \$host;
+my \$type;
+my \$key;
+if ( -f \$knownhosts ) {
+  open(KNOWN,"<\$knownhosts") || die "Could not open \$knownhosts\n" ;
+  while(<KNOWN>) {
+      chomp;
+      \$known{\$1} = "true" if(/^([^,\s]+)[,\s]/);
+      #(\$host,\$type,\$key) = (\$_ =~ /^([^,\s]+)[,\s]([^,\s]+)[,\s](.+)\$/) ;
+      (\$host,\$type,\$key) = (\$_ =~ /^([^,\s]+,*[^,\s]*,*[^,\s]*)[,\s]([^,\s]+)[,\s](.+)\$/);
+      next if ( ! defined \$host || ! defined \$type || ! defined \$key );
+      \$keys{\$host,\$type} = \$key ;
+  }
+  close(KNOWN) ;
+}
+
+##################################################
+# Now work through each of the nodes that have
+# been requested and see if any are new.
+my @new ;
+foreach ( @nodes ) {
+  push(@new,\$_) unless ( \$known{\$_} )  ;
+}
+
+#################################################
+# For all hosts found on file check if there are
+# key types missing, if any is found then add
+# them to "keys" hash table in order to be fetch
+#
+# Maybe I could check if the keys are valid?...
+#
+my \$name;
+foreach \$name (keys %keys) {
+     (\$host,\$type) = split(/\$;/,\$name);
+     \$keys{\$host,'ssh-rsa'} = ''
+       if ( ! defined \$keys{\$host,'ssh-rsa'} || ! exists \$keys{\$host,'ssh-rsa'} );
+     \$keys{\$host,'ssh-dss'} = ''
+       if ( ! defined \$keys{\$host,'ssh-dss'}  || ! exists \$keys{\$host,'ssh-dss'} );
+     \$keys{\$host,'1024'} = ''
+       if ( ! defined \$keys{\$host,'1024'}   || ! exists \$keys{\$host,'1024'} );
+}
+
+#################################################
+# Now check if there is a change on the keys
+my \$nof_updated_keys = 0;
+my \$ip;
+my \$cmd;
+my \$packedaddress;
+foreach \$name (keys %keys) {
+    (\$host,\$type) = split(/\$;/,\$name);
+    \$key = '';
+    \$packedaddress = inet_aton(\$host) ;
+    if (\$packedaddress) {
+      my \$etype = \$type;
+      \$etype = 'rsa1' if ( \$type eq "1024" );
+      \$etype = 'rsa'  if ( \$type eq "ssh-rsa" );
+      \$etype = 'dsa'  if ( \$type eq "ssh-dss" );
+      \$cmd = "/usr/bin/ssh-keyscan -t \$etype \$host 2>/dev/null" ;
+      open(SCAN,"\$cmd|") || die \$! ;
+      while(<SCAN>) {
+        chomp;
+        \$key .= \$_ ;
+      }
+      close(SCAN) ;
+      \$key =~ s/^([^,\s]+)[,\s]([^,\s]+)[,\s]//;
+      if ( \$key ne "" && \$keys{\$host,\$type} ne "\$key" ) {
+          \$keys{\$host,\$type} = \$key;
+          \$nof_updated_keys++;
+      }
+    }
+}
+
+#################################################
+# Rewrite the known host file if there are changes
+# on the keys
+if ( \$nof_updated_keys ){
+   open(KNOWN, ">\$knownhosts") ||die  \$!;
+   foreach \$name (keys %keys) {
+      (\$host,\$type) = split(/\$;/,\$name);
+      print KNOWN "\$host \$type \$keys{\$name}\n" if ( \$keys{\$name} ne "" );
+   }
+   close(KNOWN) ;
+}
+
+#################################################
+# Now add all the new nodes to the known hosts
+# file.
+open(KNOWN, ">>\$knownhosts") ||die  \$!;
+foreach(@new) {
+  \$packedaddress = inet_aton(\$_) ;
+  if (\$packedaddress) {
+    \$ip =   inet_ntoa(\$packedaddress) ;
+    \$cmd = "/usr/bin/ssh-keyscan -T 1 -t \$types \$_ \$ip 2>/dev/null" ;
+    \$key = '';
+    open(SCAN,"\$cmd|") || die \$! ;
+    while(<SCAN>) {
+      \$key .= \$_;
+    }
+    close(SCAN) ;
+    print KNOWN \$key if ( \$key ne "" );
+  }
+}
+close(KNOWN) ;
+EOF_SGE_KNOWNHOST_SCRIPT
+
+if [ "X$count" != "X" ]; then 
+   diff ${SGE_KNOWNHOST_SCRIPT}.OLD.${count} ${SGE_KNOWNHOST_SCRIPT} > /dev/null 2>&1 
+fi
+if [ $? == 0 ]; then
+     rm -f ${SGE_KNOWNHOST_SCRIPT}.OLD.${count}
+else
+     yaimlog WARNING "${SGE_KNOWNHOST_SCRIPT} exists. Your old file will be saved as ${SGE_KNOWNHOST_SCRIPT}.OLD.${count}"
+fi
+
+count=""
+
+chmod 555  ${SGE_KNOWNHOST_SCRIPT}
+
+${SGE_KNOWNHOST_SCRIPT}
+
+return 0
+}
+

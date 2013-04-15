@@ -1,0 +1,70 @@
+###############################################################################
+# Copyright (c) Members of the EGEE Collaboration. 2004.
+# See http://www.eu-egee.org/partners/ for details on the copyright holders.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+###############################################################################
+#
+# NAME        : config_sgesub
+#
+# DESCRIPTION : This function sets SGE submission options
+#
+# AUTHORS     : goncalo@lip.pt,ge-support@listas.cesga.es
+#
+# NOTES       : 
+#
+# YAIM MODULE : glite-yaim-sge-utils
+#
+###############################################################################
+
+
+function config_sgesub_check(){
+    requires $1 SGE_ROOT SGE_CELL SGE_SHARED_INSTALL
+    return $?
+}
+
+
+function config_sgesub_setenv(){
+    return 0
+}
+
+
+function config_sgesub(){
+
+INSTALL_ROOT=${INSTALL_ROOT:-/opt}
+
+if [ "X$SGE_SHARED_INSTALL" == "Xno" ]; then
+
+###
+### Setting up sge_qstat options
+###
+
+	yaimlog DEBUG "Define default sge_qstat options"
+
+	SGE_QSTAT_OPTIONS_FILE=${SGE_ROOT}/${SGE_CELL}/common/sge_qstat
+	if [ -e ${SGE_QSTAT_OPTIONS_FILE} ]; then
+   	     rm -f ${SGE_QSTAT_OPTIONS_FILE}
+	fi
+	cat <<EOF_SGE_QSTAT_OPTIONS_FILE > ${SGE_QSTAT_OPTIONS_FILE}
+-u *
+EOF_SGE_QSTAT_OPTIONS_FILE
+
+else
+        yaimlog INFO "You are using a SGE SHARED INSTALLATION."
+        yaimlog INFO "SGE instalation will not be configured since we assume everything is already working via the SHARED INSTALLATION!"
+fi
+
+
+return 0
+}
+
