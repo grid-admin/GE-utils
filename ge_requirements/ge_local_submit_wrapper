@@ -1,0 +1,165 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+import csv
+import os
+import sys
+from optparse import OptionParser
+
+#
+filename = '/etc/ge/ge_local_submit_wrapper.conf'
+ge_cmd_prefix = '#$'
+directive_map = { 
+    'account_string'		: '%s -A %s',
+    'min_cpu_interval'		: '%s -c %s',
+    'clear'			: '%s -clear %s',
+    'cwd'			: '%s -cwd %s',
+    'add_var'			: '%s -ac %s',
+    'remove_var'		: '%s -dc %s',
+    'set_var'			: '%s -sc %s',
+    's_rt'			: '%s -l s_rt=%s',
+    'h_rt'			: '%s -l h_rt=%s',
+    's_cpu'			: '%s -l s_cpu=%s',
+    'h_cpu'			: '%s -l h_cpu=%s',
+    's_fsize'			: '%s -l s_fsize=%s',
+    'h_fsize'			: '%s -l h_fsize=%s',
+    's_data'			: '%s -l s_data=%s',
+    'h_data'			: '%s -l h_data=%s',
+    's_stack'			: '%s -l s_stack=%s',
+    'h_stack'			: '%s -l h_stack=%s',
+    's_core'			: '%s -l s_core=%s',
+    'h_core'			: '%s -l h_core=%s',
+    's_rss'			: '%s -l s_rss=%s',
+    'h_rss'			: '%s -l h_rss=%s',
+    's_vmem'			: '%s -l s_vmem=%s',
+    'h_vmem'			: '%s -l h_vmem=%s',
+    'complex_values'		: '%s -l %s',
+    'mem_free'    		: '%s -l mem_free=%s',
+    'project'			: '%s -P %s',
+    'pe_list'            	: '%s -pe %s',
+    'qname'                 	: '%s -q %s',
+    'rerun'			: '%s -r %s',
+}
+
+directive_glue_mapping = { 
+    'GlueHostMainMemoryRAMSize'       : 'mem_free',
+    'GlueCEMaxWallClockTime'          : 'h_rt',
+    'GlueCEMaxObtainableWallClockTime': 'h_rt',
+    'GlueCEMaxCPUTime'                : 'h_cpu',
+    'GlueCEMaxObtainableCPUTime'      : 'h_cpu', 
+}
+#
+
+class ConfigDialect(csv.Dialect):
+    # FIXME Must also skip whitespaces that follows the text -> Now this is done in match_* methods
+    delimiter = ':'
+    quotechar = ','
+    skipinitialspace = True
+    lineterminator = '\r\n'
+    doublequote = True
+    quoting = csv.QUOTE_MINIMAL
+
+class IgnoreLinesFromConfig:
+    def __init__(self, f, comment='#'):
+        self.f = f
+        self.comment = comment
+
+    def next(self):
+        line = self.f.next()
+        while not line.strip() or line.lstrip().startswith(self.comment):
+            line = self.f.next()
+        return line
+
+    def __iter__(self):
+        return self
+
+def print_to_stderr(msg):
+    print >> sys.stderr, "[%s] %s" % (prog, msg)
+
+def match_user_reqs(fname):
+    d = {}
+    try:
+     	f = open(fname, 'r')
+        user_reqs = f.readlines()
+        f.close()
+    except Exception, e:
+        print_to_stderr('Cannot open user requirements file: %s' % fname)
+        sys.exit(-1)
+
+    for req in user_reqs:
+	req, value = req.split("=")
+	# Ignore _Min| _Max and newline
+	try:
+	    d[directive_glue_mapping[req.split("_")[0]]] = value.strip("'\n")
+	except KeyError:
+        # Ignore not known directives - FIXME: Maybe log this?
+	    pass
+
+    return d
+
+def match_local_reqs(vq):
+    d = {}
+    try:
+        f = open(filename, "r")
+        
+        for vqueue in csv.reader(IgnoreLinesFromConfig(f), ConfigDialect()):
+            if vqueue[0] == vq or vqueue[0] == "*":
+                    d[vqueue[1]] = vqueue[2]
+
+        f.close()
+
+        return d
+
+    except Exception, e:
+        print_to_stderr("Error reading configuration file: %s" % str(e))
+        sys.exit(-1)
+
+def add_reqs(outputfile, d_local, d_user={}):
+    try:
+        f = open(outputfile, 'a')
+
+	    # Here we could take the smallest value (but it increases complexity)
+    	d_user.update(d_local)
+        try:
+	        for property, value in d_user.iteritems():
+	            f.write('%s\n' % directive_map[property] % (ge_cmd_prefix, value))
+        except KeyError:
+            # Ignore not known directives - FIXME: Maybe log this?
+            pass
+
+        f.close()
+    except Exception, e:
+        print_to_stderr('Cannot write to output file: %s' % str(e))
+        sys.exit(-1)
+
+def main():
+    global prog
+    prog = os.path.basename(sys.argv[0])
+    
+    parser = OptionParser()
+    parser.set_usage("Usage: %prog [options] QUEUE")
+    parser.add_option( "",
+                       "--user-attrs",
+                       dest="user_attrs",
+                       help="file containing user requirements",
+                       metavar="FILE"
+                     )
+    (options, args) = parser.parse_args()
+    
+    if len(args) != 2:
+        print_to_stderr("Invalid arguments")
+        parser.print_help()
+        sys.exit(-1)
+    elif not os.path.exists(args[1]):
+	    print_to_stderr("Output file not found: %s" % args[1])
+	    sys.exit(-1) 
+
+    d_local = match_local_reqs(args[0])
+    if options.user_attrs:
+        add_reqs(args[1], d_local, match_user_reqs(options.user_attrs))
+    else:	
+	    add_reqs(args[1], d_local)
+
+if __name__ == "__main__":
+    main()
+
